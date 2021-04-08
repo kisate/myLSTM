@@ -1,7 +1,7 @@
 import numpy as np
 
 param_names = [
-    "f", "i", "o", "g"
+    "f", "i", "g", "o"
 ]
 
 def sigmoid(z):
@@ -32,10 +32,9 @@ activation_functions = {
 }
 
 class BaseLSTM:
-    def __init__(self, n_dims_in, n_dims_hidden, n_dims_out):
+    def __init__(self, n_dims_in, n_dims_hidden):
         self.n_dims_in = n_dims_in
         self.n_dims_hidden = n_dims_hidden
-        self.n_dims_out = n_dims_out
         
         self.params = {}
         self.grads = {}
@@ -46,18 +45,11 @@ class BaseLSTM:
             b = np.random.rand(n_dims_hidden, 1) * 0.01
             self.params[param_name] = (W, U, b)
         
-        LW = np.random.rand(n_dims_out, n_dims_hidden) * 0.01
-        Lb = np.random.rand(n_dims_out, 1) * 0.01
-
-        self.params["L"] = (LW, Lb)
-
         self.cache = []
 
     def linear_activation_forward(self, x, h, param_name, func_name):
         W, U, b = self.params[param_name]
         activation_function = activation_functions[func_name][0]
-
-        # print(W, x)
 
         z = np.dot(W, x) + np.dot(U, h) + b
         a = activation_function(z)
@@ -102,31 +94,24 @@ class BaseLSTM:
 
         return do_dh + df_dh + dg_dh + di_dh 
 
-    def backprop_step(self, dL_dh, y=None):
+    def backprop_step(self, dL_dh, data=None):
         h, cache = self.cache.pop()
         dL_dh = self.backprop_step_no_output(dL_dh, cache)
         return dL_dh
 
     
-    def backprop(self, dL_dh, learning_rate, y=None):
+    def backprop(self, dL_dh, learning_rate, data_stack=None):
 
         while self.cache:
-            if y is None:
+            if data_stack is None:
                 dL_dh = self.backprop_step(dL_dh)
             else:
-                dL_dh = self.backprop_step(dL_dh, y.pop())
+                dL_dh = self.backprop_step(dL_dh, data_stack.pop())
                 
 
-        for param_name in param_names:
-            W, U, b = self.params[param_name]
-            W_grad, U_grad, b_grad = self.params[param_name]
-
-            self.params[param_name] = (W - W_grad*learning_rate, U - U_grad*learning_rate, b - b_grad*learning_rate)
-
-        LW, Lb = self.params["L"]
-        LW_grad, Lb_grad = self.grads["L"]
-
-        self.params["L"] = (LW - LW_grad*learning_rate, Lb - Lb_grad*learning_rate)
+        for param_name, param in self.params.items():
+            grads = self.grads[param_name]
+            self.params[param_name] = tuple(param[i] - grads[i]*learning_rate for i in range(len(grads)))
 
         return dL_dh
 
@@ -143,7 +128,31 @@ class BaseLSTM:
         
         return c_new, h_new
 
-    def forward_linear(self, x):
+    def initialize_gradients(self):
+        for param_name in param_names:
+            W_grad = np.zeros((self.n_dims_hidden, self.n_dims_in))
+            U_grad = np.zeros((self.n_dims_hidden, self.n_dims_hidden))
+            b_grad = np.zeros((self.n_dims_hidden, 1))
+            self.grads[param_name] = (W_grad, U_grad, b_grad)
+
+    def forward(self, inp, h=None):
+        raise NotImplementedError()
+    
+    def train_on_example(self, x, y, learning_rate):
+        raise NotImplementedError()
+
+
+class LSTMWithOutput(BaseLSTM):
+    def __init__(self, n_dims_in, n_dims_hidden, n_dims_out):
+        super().__init__(n_dims_in, n_dims_hidden)
+        self.n_dims_out = n_dims_out
+        
+        LW = np.random.rand(n_dims_out, n_dims_hidden) * 0.01
+        Lb = np.random.rand(n_dims_out, 1) * 0.01
+
+        self.params["L"] = (LW, Lb)
+
+    def linear_output(self, x):
         LW, Lb = self.params["L"]
 
         y = np.dot(LW, x) + Lb
@@ -152,15 +161,13 @@ class BaseLSTM:
 
         return y
 
-    def backprop_linear(self, y):
+    def backprop_output(self, y):
         LW, Lb, h, y_out = self.cache.pop()
 
         dL_dy = square_loss_grad(y_out, y)
 
-        # print(h)
-
         dL_dLW = np.dot(dL_dy, h.T)
-        # print(dL_dLW)
+        
         dL_db = np.sum(dL_dy, axis=1, keepdims=True)
 
         self.grads["L"] = (dL_dLW, dL_db)
@@ -168,23 +175,13 @@ class BaseLSTM:
         return np.dot(LW.T, dL_dy)
 
     def initialize_gradients(self):
-        for param_name in param_names:
-            W_grad = np.zeros((self.n_dims_hidden, self.n_dims_in))
-            U_grad = np.zeros((self.n_dims_hidden, self.n_dims_hidden))
-            b_grad = np.zeros((self.n_dims_hidden, 1))
-            self.grads[param_name] = (W_grad, U_grad, b_grad)
+        super().initialize_gradients()
 
         LW_grad = np.zeros((self.n_dims_out, self.n_dims_hidden))
         Lb_grad = np.zeros((self.n_dims_out, 1))
         self.grads["L"] = (LW_grad, Lb_grad)
 
-    def forward(self, inp, h=None):
-        raise NotImplementedError()
-    
-    def train_on_example(self, x, y, learning_rate):
-        raise NotImplementedError()
-            
-class ManyToOneLSTM(BaseLSTM):
+class ManyToOneLSTM(LSTMWithOutput):
     def forward(self, inp, h=None):
         c = np.zeros((self.n_dims_hidden, 1))
         if not h:
@@ -193,7 +190,7 @@ class ManyToOneLSTM(BaseLSTM):
         for x in inp:
             c, h = self.forward_step(x, c, h)
 
-        y = self.forward_linear(h)
+        y = self.linear_output(h)
 
         return y
 
@@ -201,13 +198,13 @@ class ManyToOneLSTM(BaseLSTM):
         self.initialize_gradients()
         y_out = self.forward(x)
 
-        dL_dh = self.backprop_linear(y)        
+        dL_dh = self.backprop_output(y)        
         self.backprop(dL_dh, learning_rate)
 
         return square_loss(y_out, y)
 
 
-class OneToManyLSTM(BaseLSTM):
+class OneToManyLSTM(LSTMWithOutput):
     def __init__(self, n_dims_in, n_dims_hidden, max_len):
         self.max_len = max_len
         super().__init__(n_dims_in, n_dims_hidden, n_dims_out=n_dims_in)
@@ -221,13 +218,13 @@ class OneToManyLSTM(BaseLSTM):
 
         for i in range(self.max_len):
             c, h = self.forward_step(y, c, h)
-            y = self.forward_linear(h)
+            y = self.linear_output(h)
             res.append(y)
 
         return res
 
-    def backprop_step(self, dL_dh,y):
-        dL_dh += self.backprop_linear(y)
+    def backprop_step(self, dL_dh, data):
+        dL_dh += self.backprop_output(data)
         return super().backprop_step(dL_dh)
 
     def train_on_example(self, x, y, learning_rate):
@@ -239,4 +236,3 @@ class OneToManyLSTM(BaseLSTM):
         self.backprop(dL_dh, learning_rate, list(y))
 
         return np.sum(square_loss(y_out, y))
-        
