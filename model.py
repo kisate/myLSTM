@@ -25,7 +25,7 @@ class BaseLSTM:
     forward() with enabled caching should be ran before backprop()
 
     """
-    def __init__(self, n_dims_in, n_dims_hidden, loss_func, enable_caching=True):
+    def __init__(self, n_dims_in, n_dims_hidden, loss_func):
         self.n_dims_in = n_dims_in
         self.n_dims_hidden = n_dims_hidden
         self.loss_func = loss_func
@@ -40,7 +40,7 @@ class BaseLSTM:
             self.params[param_name] = (W, U, b)
         
         self.cache = []
-        self.enable_caching = enable_caching
+        self.enable_caching = True
 
     def linear_activation_forward(self, x, h, param_name, func_name):
         '''Linear layer with activation. Modifies cache'''
@@ -242,3 +242,49 @@ class ManyToManyLSTM(LSTMWithOutput):
 
     def backprop_step(self, dL_dh, dL_dc, data):
         return super().backprop_step(dL_dh + self.backprop_output(data), dL_dc)
+
+
+class Encoder(BaseLSTM):
+    def __init__(self, n_dims_in, n_dims_hidden, loss_func, embedding_dims):
+        super().__init__(embedding_dims, n_dims_hidden, loss_func)
+
+        self.embedding_dims = embedding_dims
+
+        LW = np.random.rand(embedding_dims, n_dims_in) * 0.01
+        Lb = np.random.rand(embedding_dims, 1) * 0.01
+        self.params["L"] = (LW, Lb)
+        
+    def forward(self, inp, h, c):
+        if c is None:
+            c = np.zeros((self.n_dims_hidden, 1))
+        if h is None:
+            h = np.zeros((self.n_dims_hidden, 1))    
+
+        for x in inp:
+            c, h = self.forward_step(self.linear_embedding(x), c, h)
+
+        return h
+        
+    def linear_embedding(self, x):
+        '''Calculate linear embedding'''
+        LW, Lb = self.params["L"]
+
+        emb = np.dot(LW, x) + Lb
+
+        self.save_to_cache((LW, Lb, x, emb))
+
+        return emb
+
+    def backprop_embedding(self, dL_dx):
+        '''Calculate gradient for embeddings'''
+        LW, _, h, _ = self.cache.pop()
+
+        dL_dLW = np.dot(dL_dx, h.T)
+
+        dL_db = np.sum(dL_dx, axis=1, keepdims=True)
+
+        W_grad, b_grad = self.grads["L"]
+        
+        self.grads["L"] = (W_grad + dL_dLW, b_grad + dL_db)
+
+        return np.dot(LW.T, dL_dx)
