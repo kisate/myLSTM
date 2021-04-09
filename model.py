@@ -18,11 +18,17 @@ loss_functions = {
 }
 
 class BaseLSTM:
-    def __init__(self, n_dims_in, n_dims_hidden, loss_func):
+    """Base class for LSTM.
+    
+    forward() and train_on_example() should be implemented in child 
+
+    forward() with enabled caching should be ran before backprop()
+
+    """
+    def __init__(self, n_dims_in, n_dims_hidden, loss_func, enable_caching=True):
         self.n_dims_in = n_dims_in
         self.n_dims_hidden = n_dims_hidden
         self.loss_func = loss_func
-        self.dL_dc = np.zeros((n_dims_hidden, 1))
         
         self.params = {}
         self.grads = {}
@@ -34,9 +40,10 @@ class BaseLSTM:
             self.params[param_name] = (W, U, b)
         
         self.cache = []
-        self.enable_caching = True
+        self.enable_caching = enable_caching
 
     def linear_activation_forward(self, x, h, param_name, func_name):
+        '''Linear layer with activation. Modifies cache'''
         W, U, b = self.params[param_name]
         activation_function = activation_functions[func_name][0]
 
@@ -47,6 +54,7 @@ class BaseLSTM:
         return a
 
     def backprop_step_linear(self, dL_da):
+        '''Backprop linear gate with activation. Modifies cache'''
         param_name, x, h, z, a, func_name = self.cache.pop()
         W, U, b = self.params[param_name]
         activation_function_grad = activation_functions[func_name][1]
@@ -67,6 +75,7 @@ class BaseLSTM:
         return dL_dh
 
     def backprop_step_no_output(self, dL_dh, dL_dc, cache):
+        '''Backprop hidden layer. Modifies cache'''
         f, i, g, o, c_new, c = cache
 
         dL_do = tanh(c_new)*dL_dh
@@ -88,13 +97,14 @@ class BaseLSTM:
         return dL_dh, dL_dc
 
     def backprop_step(self, dL_dh, dL_dc, data=None):
+        '''Backpropagation step'''
         h, cache = self.cache.pop()
         dL_dh, dL_dc = self.backprop_step_no_output(dL_dh, dL_dc, cache)
         return dL_dh, dL_dc
 
     
     def backprop(self, dL_dh, dL_dc, data_stack=None):
-
+        '''Clear cache and calculate gradients'''
         while self.cache:
             if data_stack is None:
                 dL_dh, dL_dc = self.backprop_step(dL_dh, dL_dc)
@@ -109,6 +119,7 @@ class BaseLSTM:
             self.params[param_name] = tuple(param[i] - grads[i]*learning_rate for i in range(len(grads)))
 
     def forward_step(self, x, c, h):
+        '''Hidden layer forward'''
         f,i,g,o = 0, 0,0,0
         f = self.linear_activation_forward(x, h, "f", "sigmoid")
         i = self.linear_activation_forward(x, h, "i", "sigmoid")
@@ -141,6 +152,16 @@ class BaseLSTM:
 
 
 class LSTMWithOutput(BaseLSTM):
+    """
+    Base class for LSTMs with output activation function. 
+
+    forward and train_on_example are not implemented.
+
+    loss_func takes output before running through activation
+
+    For example: loss_func = 'sofmtax_ce', output_activation = softmax
+
+    """
     def __init__(self, n_dims_in, n_dims_hidden, loss_func, n_dims_out, output_activation):
         super().__init__(n_dims_in, n_dims_hidden, loss_func)
         self.n_dims_out = n_dims_out
@@ -152,15 +173,17 @@ class LSTMWithOutput(BaseLSTM):
         self.params["L"] = (LW, Lb)
 
     def linear_output(self, x):
+        '''Apply activation function to output'''
         LW, Lb = self.params["L"]
 
         y = np.dot(LW, x) + Lb
 
         self.save_to_cache((LW, Lb, x, y))
 
-        return self.output_activation(y)
+        return self.output_activation(y), x
 
     def backprop_output(self, y):
+        '''Calculate gradient for hidden vector'''
         LW, Lb, h, y_out = self.cache.pop()
 
         dL_dy = loss_functions[self.loss_func][1](y_out, y)
@@ -194,7 +217,7 @@ class ManyToOneLSTM(LSTMWithOutput):
         for x in inp:
             c, h = self.forward_step(x, c, h)
 
-        y = self.linear_output(h)
+        y, _ = self.linear_output(h)
 
         return y
 
@@ -212,7 +235,7 @@ class ManyToManyLSTM(LSTMWithOutput):
 
         for x in inp:
             c, h = self.forward_step(x, c, h)
-            y = self.linear_output(h)
+            y, _ = self.linear_output(h)
             res.append(y)
 
         return np.array(res)

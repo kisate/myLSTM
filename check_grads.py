@@ -101,7 +101,7 @@ class OneToOneLSTM(LSTMWithOutput):
 
         c, h = self.forward_step(inp, c, h)
 
-        y = self.linear_output(h)
+        y, _ = self.linear_output(h)
 
         return y
 
