@@ -1,8 +1,8 @@
 from functions import *
-from model import LSTMWithOutput, ManyToOneLSTM, loss_functions
+from model import *
 import numpy as np
 
-np.random.seed(12321)
+# np.random.seed(2312)
 
 def check_function_grad(func, h):
     shape = h.shape
@@ -11,18 +11,26 @@ def check_function_grad(func, h):
 
     eps = 1e-7
 
-    for i in range(shape[0]):
-        h_plus_eps = h.copy()
-        h_minus_eps = h.copy()
+    for x in range(shape[0]):
+        for y in range(shape[1]):
+            h_plus_eps = h.copy()
+            h_minus_eps = h.copy()
 
-        h_plus_eps[i] += np.array(eps)
-        h_minus_eps[i] += np.array(-eps)
-        h_plus_loss = func(h_plus_eps)
-        h_minus_loss = func(h_minus_eps)
+            h_plus_eps[x, y] += np.array(eps)
+            h_minus_eps[x, y] += np.array(-eps)
+            h_plus_loss = func(h_plus_eps)
+            h_minus_loss = func(h_minus_eps)
 
-        df_dh[i] = np.array((h_plus_loss - h_minus_loss) / (2*eps))
+            df_dh[x, y] = np.array((h_plus_loss - h_minus_loss) / (2*eps))
     
     return df_dh
+
+# def check_param_grads(func, model: BaseLSTM):
+#     results = []
+#     for param in param_names:
+#         W, U, b = model.params["param"]
+
+
 
 def run_checks(checker, times, eps, name):
     results = np.array([np.linalg.norm(checker()) for _ in range(times)])
@@ -44,6 +52,7 @@ def check_square():
 
 def check_softmax_ce():
     n_dims = 10
+    
     x = np.random.rand(n_dims, 1)
     y = np.zeros((n_dims, 1))
     y[np.random.randint(10)] = np.array([1])
@@ -99,6 +108,7 @@ def check_one_layer():
     x = np.random.rand(n_dims_in, 1)
     h = np.random.rand(n_dims_hidden, 1)
     c = np.random.rand(n_dims_hidden , 1)
+
     y = np.zeros((n_dims_out, 1))
     y[np.random.randint(n_dims_out)] = np.array([1])
 
@@ -111,7 +121,8 @@ def check_one_layer():
     model.forward(x, h, c)
 
     dL_dh = model.backprop_output(y)
-    dL_dh = model.backprop(dL_dh, 0)
+    dL_dc = np.zeros(h.shape)
+    dL_dh, dL_dc = model.backprop(dL_dh, dL_dc, 0)
 
     return dL_dh_app - dL_dh
 
@@ -119,30 +130,69 @@ def check_many_to_one():
     n_dims_in = 7
     n_dims_hidden = 9
     n_dims_out = 4
-    n_samples = 20
-    model = ManyToOneLSTM(n_dims_in, n_dims_hidden, "softmax_ce", n_dims_out, softmax)
+    n_samples = 2
+
+    model = ManyToOneLSTM(n_dims_in, n_dims_hidden, "square", n_dims_out, lambda x: x)
+
     x = np.random.rand(n_samples, n_dims_in, 1)
-    x = np.random.rand(n_dims_in, 1)
     h = np.random.rand(n_dims_hidden, 1)
     c = np.random.rand(n_dims_hidden , 1)
+
     y = np.zeros((n_dims_out, 1))
     y[np.random.randint(n_dims_out)] = np.array([1])
 
     model.initialize_gradients()
     model.enable_caching = False
 
-    dL_dh_app = check_function_grad(lambda h: cross_entropy_loss(model.forward(x, h, c), y), h)
+    dL_dh_app = check_function_grad(lambda h: square_loss(model.forward(x, h, c), y), h)
 
     model.enable_caching = True
     model.forward(x, h, c)
 
     dL_dh = model.backprop_output(y)
-    dL_dh = model.backprop(dL_dh, 0)
+    dL_dc = np.zeros(h.shape)
+    dL_dh, dL_dc = model.backprop(dL_dh, dL_dc, 0)
 
     return dL_dh_app - dL_dh
 
+def check_many_to_many():
+    n_dims_in = 10
+    n_dims_hidden = 13
+    n_dims_out = 7
+    n_samples = 10
+
+    model = ManyToManyLSTM(n_dims_in, n_dims_hidden, "square", n_dims_out, lambda x : x)
+
+    x = np.random.rand(n_samples, n_dims_in, 1)
+    h = np.random.rand(n_dims_hidden, 1)
+    c = np.zeros(h.shape)
+
+    # y = np.array([np.array([x]).T for x in np.eye(n_dims_out)[np.random.choice(n_dims_out, n_samples)]])
+    y = np.random.rand(n_samples, n_dims_out, 1)
+
+    model.initialize_gradients()
+    model.enable_caching = False
+
+    # print(cross_entropy_loss(model.forward(x, h, c), y).sum())
+
+    dL_dh_app = check_function_grad(lambda h: square_loss(model.forward(x, h, c), y).sum(), h)
+
+    model.enable_caching = True
+    model.forward(x, h, c)
+
+    dL_dh = np.zeros(h.shape)
+    dL_dc = np.zeros(h.shape)
+    dL_dh, dL_dc = model.backprop(dL_dh, dL_dc, 0, list(y))
+
+    # print(dL_dh)
+    # print(dL_dh_app)
+
+    return dL_dh_app - dL_dh
 
 # check_one_layer()
+# run_checks(check_softmax_ce, 10, 1e-7, "softmax_ce")
+run_checks(check_one_layer, 10, 1e-7, "One to One")
 run_checks(check_many_to_one, 10, 1e-7, "Many to One")
+run_checks(check_many_to_many, 10, 1e-7, "Many to Many")
 # check_activations()
 # check_linear_with_activation()

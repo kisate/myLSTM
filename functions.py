@@ -21,11 +21,11 @@ def softmax(z):
     return e_z / e_z.sum(axis=0)
 
 def softmax_cross_entropy_loss(z, y):
-    e_z = np.exp(z - np.max(z))
+    e_z = np.exp(z - np.max(z, axis=0))
     return np.sum(- np.ma.log (np.sum(e_z*y, axis=0) / e_z.sum(axis=0)).filled(0) * y, axis=0)
 
 def softmax_cross_entropy_loss_grad(z, y):
-    e_z = np.exp(z - np.max(z))
+    e_z = np.exp(z - np.max(z, axis=0))
     s = e_z.sum(axis=0)
     return y * (np.sum(e_z*y, axis=0) / s - 1) + e_z*(1 - y) / s
 
