@@ -67,16 +67,16 @@ class BaseLSTM:
 
     def backprop_step_no_output(self, dL_dh, cache):
         f, i, g, o, c, c_prev = cache
-        dL_do = tanh(c)
+        dL_do = tanh(c)*dL_dh
 
         c_grad = o*tanh_grad(dL_dh, c)
 
-        dL_df = c_grad * c_prev * dL_do
-        dL_di = c_grad * g * dL_do
-        dL_dg = c_grad * i * dL_do
+        dL_df = c_grad * c_prev
+        dL_di = c_grad * g 
+        dL_dg = c_grad * i
         
-        dg_dh = self.backprop_step_linear(dL_dg)
         do_dh = self.backprop_step_linear(dL_do)
+        dg_dh = self.backprop_step_linear(dL_dg)
         di_dh = self.backprop_step_linear(dL_di)
         df_dh = self.backprop_step_linear(dL_df)
 
@@ -104,13 +104,19 @@ class BaseLSTM:
         return dL_dh
 
     def forward_step(self, x, c, h):
+        f,i,g,o = 0, 0,0,0
         f = self.linear_activation_forward(x, h, "f", "sigmoid")
         i = self.linear_activation_forward(x, h, "i", "sigmoid")
-        g = self.linear_activation_forward(x, h, "g", "sigmoid")
-        o = self.linear_activation_forward(x, h, "o", "tanh")
+        g = self.linear_activation_forward(x, h, "g", "tanh")
+        o = self.linear_activation_forward(x, h, "o", "sigmoid")
 
         c_new = f * c + i * g
-        h_new = o * sigmoid(c_new)
+        # c_new = i * g
+        h_new = o * tanh(c_new)
+        # h_new = tanh(c_new)
+
+        # c_new = c
+        # h_new = f
 
         self.save_to_cache((h_new, (f, i, g, o, c_new, c)))
         
@@ -127,7 +133,7 @@ class BaseLSTM:
         if (self.enable_caching):
             self.cache.append(value)
 
-    def forward(self, inp, h=None):
+    def forward(self, inp, h=None, c=None):
         raise NotImplementedError()
     
     def train_on_example(self, x, y, learning_rate):
@@ -150,11 +156,9 @@ class LSTMWithOutput(BaseLSTM):
 
         y = np.dot(LW, x) + Lb
 
-        # y = self.output_activation(y)
-
         self.save_to_cache((LW, Lb, x, y))
 
-        return y
+        return self.output_activation(y)
 
     def backprop_output(self, y):
         LW, Lb, h, y_out = self.cache.pop()
@@ -177,6 +181,7 @@ class LSTMWithOutput(BaseLSTM):
         LW_grad = np.zeros((self.n_dims_out, self.n_dims_hidden))
         Lb_grad = np.zeros((self.n_dims_out, 1))
         self.grads["L"] = (LW_grad, Lb_grad)
+
 
 class ManyToOneLSTM(LSTMWithOutput):
     def forward(self, inp, h=None):

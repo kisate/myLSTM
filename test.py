@@ -2,6 +2,7 @@ from model import ManyToOneLSTM, OneToManyLSTM, ManyToManyLSTM
 import numpy as np
 from functions import softmax
 
+
 n_classes = 20
 n_samples = 10
 
