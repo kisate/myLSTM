@@ -24,19 +24,22 @@ class BaseLSTM:
 
     forward() with enabled caching should be ran before backprop()
 
+    params:
+    n_dims_in, n_dims_out, loss_func
+
     """
-    def __init__(self, n_dims_in, n_dims_hidden, loss_func):
-        self.n_dims_in = n_dims_in
-        self.n_dims_hidden = n_dims_hidden
-        self.loss_func = loss_func
+    def __init__(self, params):
+        self.n_dims_in = params["n_dims_in"]
+        self.n_dims_hidden = params["n_dims_hidden"]
+        self.loss_func = params["loss_func"]
         
         self.params = {}
         self.grads = {}
         
         for param_name in param_names:
-            W = np.random.rand(n_dims_hidden, n_dims_in) * 0.01
-            U = np.random.rand(n_dims_hidden, n_dims_hidden) * 0.01
-            b = np.random.rand(n_dims_hidden, 1) * 0.01
+            W = np.random.rand(self.n_dims_hidden, self.n_dims_in) * 0.01
+            U = np.random.rand(self.n_dims_hidden, self.n_dims_hidden) * 0.01
+            b = np.random.rand(self.n_dims_hidden, 1) * 0.01
             self.params[param_name] = (W, U, b)
         
         self.cache = []
@@ -66,13 +69,15 @@ class BaseLSTM:
         dL_dU = np.dot(dL_dz, h.T)
         dL_dh = np.dot(U.T, dL_dz)
 
+        dL_dx = np.dot(W.T, dL_dz)
+
         dL_db = np.sum(dL_dz, axis=1, keepdims=True) 
 
         W_grad, U_grad, b_grad = self.grads[param_name]
         
         self.grads[param_name] = (W_grad + dL_dW, U_grad + dL_dU, b_grad + dL_db)
 
-        return dL_dh
+        return dL_dh, dL_dx
 
     def backprop_step_no_output(self, dL_dh, dL_dc, cache):
         '''Backprop hidden layer. Modifies cache'''
@@ -86,30 +91,30 @@ class BaseLSTM:
         dL_di = dL_dc * g 
         dL_dg = dL_dc * i
 
-        do_dh = self.backprop_step_linear(dL_do)
-        dg_dh = self.backprop_step_linear(dL_dg)
-        di_dh = self.backprop_step_linear(dL_di)
-        df_dh = self.backprop_step_linear(dL_df)
+        do_dh, do_dx = self.backprop_step_linear(dL_do)
+        dg_dh, dg_dx = self.backprop_step_linear(dL_dg)
+        di_dh, di_dx = self.backprop_step_linear(dL_di)
+        df_dh, df_dx = self.backprop_step_linear(dL_df)
 
         dL_dh = do_dh + df_dh + dg_dh + di_dh 
         dL_dc = dL_dc*f
+        dL_dx = do_dx + df_dx + dg_dx + di_dx
 
-        return dL_dh, dL_dc
+        return dL_dh, dL_dc, dL_dx
 
     def backprop_step(self, dL_dh, dL_dc, data=None):
         '''Backpropagation step'''
         h, cache = self.cache.pop()
-        dL_dh, dL_dc = self.backprop_step_no_output(dL_dh, dL_dc, cache)
-        return dL_dh, dL_dc
+        return self.backprop_step_no_output(dL_dh, dL_dc, cache)
 
     
     def backprop(self, dL_dh, dL_dc, data_stack=None):
         '''Clear cache and calculate gradients'''
         while self.cache:
             if data_stack is None:
-                dL_dh, dL_dc = self.backprop_step(dL_dh, dL_dc)
+                dL_dh, dL_dc, dL_dx = self.backprop_step(dL_dh, dL_dc)
             else:
-                dL_dh, dL_dc = self.backprop_step(dL_dh, dL_dc, data_stack.pop())
+                dL_dh, dL_dc, dL_dx = self.backprop_step(dL_dh, dL_dc, data_stack.pop())
                 
         return dL_dh, dL_dc
 
@@ -134,11 +139,8 @@ class BaseLSTM:
         return c_new, h_new
 
     def initialize_gradients(self):
-        for param_name in param_names:
-            W_grad = np.zeros((self.n_dims_hidden, self.n_dims_in))
-            U_grad = np.zeros((self.n_dims_hidden, self.n_dims_hidden))
-            b_grad = np.zeros((self.n_dims_hidden, 1))
-            self.grads[param_name] = (W_grad, U_grad, b_grad)
+        for param_name, params in self.params.items():
+            self.grads[param_name] = tuple(np.zeros(param.shape) for param in params)
 
     def save_to_cache(self, value):
         if (self.enable_caching):
@@ -161,20 +163,23 @@ class LSTMWithOutput(BaseLSTM):
 
     For example: loss_func = 'sofmtax_ce', output_activation = softmax
 
-    """
-    def __init__(self, n_dims_in, n_dims_hidden, loss_func, n_dims_out, output_activation):
-        super().__init__(n_dims_in, n_dims_hidden, loss_func)
-        self.n_dims_out = n_dims_out
-        self.output_activation = output_activation
-        
-        LW = np.random.rand(n_dims_out, n_dims_hidden) * 0.01
-        Lb = np.random.rand(n_dims_out, 1) * 0.01
+    params:
+    n_dims_out, n_dims_in, n_dims_hidden, loss_func, output_activation
 
-        self.params["L"] = (LW, Lb)
+    """
+    def __init__(self, params):
+        super().__init__(params)
+        self.n_dims_out = params["n_dims_out"]
+        self.output_activation = params["output_activation"]
+        
+        LW = np.random.rand(params["n_dims_out"], params["n_dims_hidden"]) * 0.01
+        Lb = np.random.rand(params["n_dims_out"], 1) * 0.01
+
+        self.params["Lo"] = (LW, Lb)
 
     def linear_output(self, x):
         '''Apply activation function to output'''
-        LW, Lb = self.params["L"]
+        LW, Lb = self.params["Lo"]
 
         y = np.dot(LW, x) + Lb
 
@@ -192,19 +197,11 @@ class LSTMWithOutput(BaseLSTM):
 
         dL_db = np.sum(dL_dy, axis=1, keepdims=True)
 
-        W_grad, b_grad = self.grads["L"]
+        W_grad, b_grad = self.grads["Lo"]
         
-        self.grads["L"] = (W_grad + dL_dLW, b_grad + dL_db)
+        self.grads["Lo"] = (W_grad + dL_dLW, b_grad + dL_db)
 
         return np.dot(LW.T, dL_dy)
-
-    def initialize_gradients(self):
-        super().initialize_gradients()
-
-        LW_grad = np.zeros((self.n_dims_out, self.n_dims_hidden))
-        Lb_grad = np.zeros((self.n_dims_out, 1))
-        self.grads["L"] = (LW_grad, Lb_grad)
-
 
 class ManyToOneLSTM(LSTMWithOutput):
     def forward(self, inp, h=None, c=None):
@@ -222,8 +219,12 @@ class ManyToOneLSTM(LSTMWithOutput):
         return y
 
 class ManyToManyLSTM(LSTMWithOutput):
-    def __init__(self, n_dims_in, n_dims_hidden, loss_func, n_dims_out, output_activation):
-        super().__init__(n_dims_in, n_dims_hidden, loss_func, n_dims_out=n_dims_out, output_activation=output_activation)
+    """
+    params:
+    n_dims_in, n_dims_hidden, loss_func, n_dims_out, output_activation
+    """
+    def __init__(self, params):
+        super().__init__(params)
 
     def forward(self, inp, h=None, c=None):
         if c is None:
@@ -243,31 +244,23 @@ class ManyToManyLSTM(LSTMWithOutput):
     def backprop_step(self, dL_dh, dL_dc, data):
         return super().backprop_step(dL_dh + self.backprop_output(data), dL_dc)
 
+class LSTMWithEmbeddings(BaseLSTM):
+    """
+    params:
+    n_dims_in, n_dims_hidden, loss_func, embedding_dims
+    """
+    def __init__(self, params):
+        super().__init__(params)
 
-class Encoder(BaseLSTM):
-    def __init__(self, n_dims_in, n_dims_hidden, loss_func, embedding_dims):
-        super().__init__(embedding_dims, n_dims_hidden, loss_func)
+        self.embedding_dims = params["embedding_dims"]
 
-        self.embedding_dims = embedding_dims
-
-        LW = np.random.rand(embedding_dims, n_dims_in) * 0.01
-        Lb = np.random.rand(embedding_dims, 1) * 0.01
-        self.params["L"] = (LW, Lb)
-        
-    def forward(self, inp, h, c):
-        if c is None:
-            c = np.zeros((self.n_dims_hidden, 1))
-        if h is None:
-            h = np.zeros((self.n_dims_hidden, 1))    
-
-        for x in inp:
-            c, h = self.forward_step(self.linear_embedding(x), c, h)
-
-        return h
-        
+        LW = np.random.rand(params["embedding_dims"], params["n_dims_in"]) * 0.01
+        Lb = np.random.rand(params["embedding_dims"], 1) * 0.01
+        self.params["Le"] = (LW, Lb)
+    
     def linear_embedding(self, x):
         '''Calculate linear embedding'''
-        LW, Lb = self.params["L"]
+        LW, Lb = self.params["Le"]
 
         emb = np.dot(LW, x) + Lb
 
@@ -283,8 +276,46 @@ class Encoder(BaseLSTM):
 
         dL_db = np.sum(dL_dx, axis=1, keepdims=True)
 
-        W_grad, b_grad = self.grads["L"]
+        W_grad, b_grad = self.grads["Le"]
         
-        self.grads["L"] = (W_grad + dL_dLW, b_grad + dL_db)
+        self.grads["Le"] = (W_grad + dL_dLW, b_grad + dL_db)
 
         return np.dot(LW.T, dL_dx)
+
+    def backprop_step(self, dL_dh, dL_dc, data=None):
+        dL_dh, dL_dc, dL_dx = super().backprop_step(dL_dh, dL_dc) 
+        self.backprop_embedding(dL_dx)
+        return dL_dh, dL_dc, dL_dx
+
+class Encoder(LSTMWithEmbeddings):
+    def forward(self, inp, h, c):
+        if c is None:
+            c = np.zeros((self.n_dims_hidden, 1))
+        if h is None:
+            h = np.zeros((self.n_dims_hidden, 1))    
+
+        for x in inp:
+            c, h = self.forward_step(self.linear_embedding(x), c, h)
+
+        return h
+        
+
+class Decoder(LSTMWithOutput, LSTMWithEmbeddings):
+    """
+    params:
+    n_dims_hidden, loss_func, embedding_dims, n_dims_out, output_activation
+    """
+    def __init__(self, params):
+        params["n_dims_in"] = params["embedding_dims"]
+        super().__init__(params)
+    
+    def forward(self, inp, h, c):
+        if c is None:
+            c = np.zeros((self.n_dims_hidden, 1))
+        if h is None:
+            h = np.zeros((self.n_dims_hidden, 1))    
+
+        for x in inp:
+            c, h = self.forward_step(self.linear_embedding(x), c, h)
+            y, _ = self.linear_output(h)
+        return h

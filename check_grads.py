@@ -110,7 +110,16 @@ def check_one_layer():
     n_dims_in = 7
     n_dims_hidden = 9
     n_dims_out = 4
-    model = OneToOneLSTM(n_dims_in, n_dims_hidden, "softmax_ce", n_dims_out, softmax)
+
+    params = {
+        "n_dims_in" : n_dims_in,
+        "n_dims_hidden" : n_dims_hidden,
+        "n_dims_out" : n_dims_out,
+        "loss_func" : "softmax_ce",
+        "output_activation" : softmax
+    }
+
+    model = OneToOneLSTM(params)
     
     x = np.random.rand(n_dims_in, 1)
     h = np.random.rand(n_dims_hidden, 1)
@@ -139,7 +148,15 @@ def check_many_to_one():
     n_dims_out = 4
     n_samples = 2
 
-    model = ManyToOneLSTM(n_dims_in, n_dims_hidden, "square", n_dims_out, lambda x: x)
+    params = {
+        "n_dims_in" : n_dims_in,
+        "n_dims_hidden" : n_dims_hidden,
+        "n_dims_out" : n_dims_out,
+        "loss_func" : "square",
+        "output_activation" : lambda x : x
+    }
+
+    model = ManyToOneLSTM(params)
 
     x = np.random.rand(n_samples, n_dims_in, 1)
     h = np.random.rand(n_dims_hidden, 1)
@@ -168,7 +185,16 @@ def check_many_to_many():
     n_dims_out = 7
     n_samples = 10
 
-    model = ManyToManyLSTM(n_dims_in, n_dims_hidden, "square", n_dims_out, lambda x : x)
+
+    params = {
+        "n_dims_in" : n_dims_in,
+        "n_dims_hidden" : n_dims_hidden,
+        "n_dims_out" : n_dims_out,
+        "loss_func" : "square",
+        "output_activation" : lambda x : x
+    }
+
+    model = ManyToManyLSTM(params)
 
     x = np.random.rand(n_samples, n_dims_in, 1)
     h = np.random.rand(n_dims_hidden, 1)
@@ -196,11 +222,62 @@ def check_many_to_many():
 
     return dL_dh_app - dL_dh
 
+def check_encoder():
+    n_dims_in = 10
+    n_dims_hidden = 13
+    emb_dims = 7
+    n_samples = 10
+
+    params = {
+        "n_dims_in" : n_dims_in,
+        "n_dims_hidden" : n_dims_hidden,
+        "embedding_dims" : emb_dims,
+        "loss_func" : "square"
+    }
+
+    model = Encoder(params)
+
+    x = np.random.rand(n_samples, n_dims_in, 1)
+    h = np.random.rand(n_dims_hidden, 1)
+    c = np.zeros(h.shape)
+
+    # y = np.array([np.array([x]).T for x in np.eye(n_dims_out)[np.random.choice(n_dims_out, n_samples)]])
+    y = np.random.rand(n_dims_hidden, 1)
+
+    model.initialize_gradients()
+    model.enable_caching = False
+
+    # print(cross_entropy_loss(model.forward(x, h, c), y).sum())
+
+    dL_dh_app = calc_grad(lambda h: square_loss(model.forward(x, h, c), y).sum(), h)
+
+    model.enable_caching = True
+    y_out = model.forward(x, h, c)
+
+    dL_dh = square_loss_grad(y_out, y)
+    dL_dc = np.zeros(h.shape)
+    dL_dh, dL_dc = model.backprop(dL_dh, dL_dc)
+
+    # print(dL_dh)
+    # print(dL_dh_app)
+
+    return dL_dh_app - dL_dh
+
+
 def check_one_to_one_params():
     n_dims_in = 7
     n_dims_hidden = 9
     n_dims_out = 4
-    model = OneToOneLSTM(n_dims_in, n_dims_hidden, "softmax_ce", n_dims_out, softmax)
+
+    params = {
+        "n_dims_in" : n_dims_in,
+        "n_dims_hidden" : n_dims_hidden,
+        "n_dims_out" : n_dims_out,
+        "loss_func" : "softmax_ce",
+        "output_activation" : softmax
+    }
+
+    model = OneToOneLSTM(params)
     
     x = np.random.rand(n_dims_in, 1)
     h = np.random.rand(n_dims_hidden, 1)
@@ -237,7 +314,15 @@ def check_many_to_many_params():
     n_dims_out = 7
     n_samples = 2
 
-    model = ManyToManyLSTM(n_dims_in, n_dims_hidden, "square", n_dims_out, lambda x : x)
+    params = {
+        "n_dims_in" : n_dims_in,
+        "n_dims_hidden" : n_dims_hidden,
+        "n_dims_out" : n_dims_out,
+        "loss_func" : "square",
+        "output_activation" : lambda x : x
+    }
+
+    model = ManyToManyLSTM(params)
 
     x = np.random.rand(n_samples, n_dims_in, 1)
     h = np.random.rand(n_dims_hidden, 1)
@@ -270,9 +355,57 @@ def check_many_to_many_params():
 
     return result / total
 
-run_checks(check_softmax_ce, 10, 1e-7, "softmax_ce")
-run_checks(check_one_layer, 10, 1e-7, "One to One")
-run_checks(check_many_to_one, 10, 1e-7, "Many to One")
-run_checks(check_many_to_many, 10, 1e-7, "Many to Many")
-run_checks(check_one_to_one_params, 10, 1e-7, "OtO params")
-run_checks(check_many_to_many_params, 1, 1e-7, "MtM params")
+def check_encoder_params():
+    n_dims_in = 10
+    n_dims_hidden = 13
+    emb_dims = 10
+    n_samples = 10
+
+    params = {
+        "n_dims_in" : n_dims_in,
+        "n_dims_hidden" : n_dims_hidden,
+        "embedding_dims" : emb_dims,
+        "loss_func" : "square"
+    }
+
+    model = Encoder(params)
+
+    x = np.random.rand(n_samples, n_dims_in, 1)
+    h = np.random.rand(n_dims_hidden, 1)
+    c = np.zeros(h.shape)
+
+    # y = np.array([np.array([x]).T for x in np.eye(n_dims_out)[np.random.choice(n_dims_out, n_samples)]])
+    y = np.random.rand(n_dims_hidden, 1)
+
+    model.initialize_gradients()
+    model.enable_caching = False
+
+    # print(cross_entropy_loss(model.forward(x, h, c), y).sum())
+
+    results = calc_param_grads(lambda model: square_loss(model.forward(x, h, c), y).sum(), model)
+
+    model.enable_caching = True
+    y_out = model.forward(x, h, c)
+
+    dL_dh = square_loss_grad(y_out, y)
+    dL_dc = np.zeros(h.shape)
+    dL_dh, dL_dc = model.backprop(dL_dh, dL_dc)
+
+    result = 0
+    total = 0
+
+    for param_name, params in model.grads.items():
+        for i in range(len(params)):
+            result += np.linalg.norm(params[i] - results[param_name][i])
+            total += 1
+
+    return result / total
+
+
+# run_checks(check_softmax_ce, 10, 1e-7, "softmax_ce")
+# run_checks(check_one_layer, 10, 1e-7, "One to One")
+# run_checks(check_many_to_one, 10, 1e-7, "Many to One")
+# run_checks(check_many_to_many, 10, 1e-7, "Many to Many")
+# run_checks(check_one_to_one_params, 10, 1e-7, "OtO params")
+# run_checks(check_many_to_many_params, 1, 1e-7, "MtM params")
+run_checks(check_encoder_params, 10, 1e-7, "Encoder params")
