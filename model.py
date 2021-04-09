@@ -1,40 +1,27 @@
+from functions import *
+
 import numpy as np
 
 param_names = [
     "f", "i", "g", "o"
 ]
 
-def sigmoid(z):
-    return 1 / (1 + np.exp(-z))
-
-def tanh(z):
-    return np.tanh(z)
-
-def sigmoid_grad(dL, z):
-    a = sigmoid(z)
-
-    return dL * a * (1 - a)
-
-def tanh_grad(dL, z):
-    a = tanh(z)
-
-    return dL * (1 - np.square(a))
-
-def square_loss(z, y):
-    return np.sum(0.5 * np.square(y - z), axis=0)
-
-def square_loss_grad(z, y):
-    return z - y
 
 activation_functions = {
     "sigmoid" : (sigmoid, sigmoid_grad),
     "tanh" : (tanh, tanh_grad)
 }
 
+loss_functions = {
+    "square" : (square_loss, square_loss_grad),
+    "softmax_ce" : (softmax_cross_entropy_loss, softmax_cross_entropy_loss_grad)
+}
+
 class BaseLSTM:
-    def __init__(self, n_dims_in, n_dims_hidden):
+    def __init__(self, n_dims_in, n_dims_hidden, loss_func):
         self.n_dims_in = n_dims_in
         self.n_dims_hidden = n_dims_hidden
+        self.loss_func = loss_func
         
         self.params = {}
         self.grads = {}
@@ -46,6 +33,7 @@ class BaseLSTM:
             self.params[param_name] = (W, U, b)
         
         self.cache = []
+        self.enable_caching = True
 
     def linear_activation_forward(self, x, h, param_name, func_name):
         W, U, b = self.params[param_name]
@@ -54,7 +42,7 @@ class BaseLSTM:
         z = np.dot(W, x) + np.dot(U, h) + b
         a = activation_function(z)
 
-        self.cache.append((param_name, x, h, z, a, func_name))
+        self.save_to_cache((param_name, x, h, z, a, func_name))
         return a
 
     def backprop_step_linear(self, dL_da):
@@ -124,7 +112,7 @@ class BaseLSTM:
         c_new = f * c + i * g
         h_new = o * sigmoid(c_new)
 
-        self.cache.append((h_new, (f, i, g, o, c_new, c)))
+        self.save_to_cache((h_new, (f, i, g, o, c_new, c)))
         
         return c_new, h_new
 
@@ -135,6 +123,10 @@ class BaseLSTM:
             b_grad = np.zeros((self.n_dims_hidden, 1))
             self.grads[param_name] = (W_grad, U_grad, b_grad)
 
+    def save_to_cache(self, value):
+        if (self.enable_caching):
+            self.cache.append(value)
+
     def forward(self, inp, h=None):
         raise NotImplementedError()
     
@@ -143,9 +135,10 @@ class BaseLSTM:
 
 
 class LSTMWithOutput(BaseLSTM):
-    def __init__(self, n_dims_in, n_dims_hidden, n_dims_out):
-        super().__init__(n_dims_in, n_dims_hidden)
+    def __init__(self, n_dims_in, n_dims_hidden, loss_func, n_dims_out, output_activation):
+        super().__init__(n_dims_in, n_dims_hidden, loss_func)
         self.n_dims_out = n_dims_out
+        self.output_activation = output_activation
         
         LW = np.random.rand(n_dims_out, n_dims_hidden) * 0.01
         Lb = np.random.rand(n_dims_out, 1) * 0.01
@@ -157,17 +150,21 @@ class LSTMWithOutput(BaseLSTM):
 
         y = np.dot(LW, x) + Lb
 
-        self.cache.append((LW, Lb, x, y))
+        # y = self.output_activation(y)
+
+        self.save_to_cache((LW, Lb, x, y))
 
         return y
 
     def backprop_output(self, y):
         LW, Lb, h, y_out = self.cache.pop()
 
-        dL_dy = square_loss_grad(y_out, y)
+        dL_dy = loss_functions[self.loss_func][1](y_out, y)
 
         dL_dLW = np.dot(dL_dy, h.T)
         
+        # print(y_out, y)
+
         dL_db = np.sum(dL_dy, axis=1, keepdims=True)
 
         self.grads["L"] = (dL_dLW, dL_db)
@@ -201,13 +198,13 @@ class ManyToOneLSTM(LSTMWithOutput):
         dL_dh = self.backprop_output(y)        
         self.backprop(dL_dh, learning_rate)
 
-        return square_loss(y_out, y)
+        return loss_functions[self.loss_func][0](y_out, y)
 
 
 class OneToManyLSTM(LSTMWithOutput):
-    def __init__(self, n_dims_in, n_dims_hidden, max_len):
+    def __init__(self, n_dims_in, n_dims_hidden, loss_func, output_activation, max_len):
         self.max_len = max_len
-        super().__init__(n_dims_in, n_dims_hidden, n_dims_out=n_dims_in)
+        super().__init__(n_dims_in, n_dims_hidden, loss_func, n_dims_out=n_dims_in, output_activation=output_activation)
     def forward(self, inp, h=None):
         c = np.zeros((self.n_dims_hidden, 1))
         if not h:
@@ -235,4 +232,68 @@ class OneToManyLSTM(LSTMWithOutput):
         
         self.backprop(dL_dh, learning_rate, list(y))
 
-        return np.sum(square_loss(y_out, y))
+        return np.sum(loss_functions[self.loss_func][0](y_out, y))
+
+class ManyToManyLSTM(LSTMWithOutput):
+    def __init__(self, n_dims_in, n_dims_hidden, loss_func, output_activation, n_dims_out):
+        super().__init__(n_dims_in, n_dims_hidden, loss_func, output_activation=output_activation, n_dims_out=n_dims_out)
+
+    def forward(self, inp, h=None):
+        c = np.zeros((self.n_dims_hidden, 1))
+        if h is None:
+            h = np.zeros((self.n_dims_hidden, 1))
+        
+        res = []
+
+        for x in inp:
+            c, h = self.forward_step(x, c, h)
+            y = self.linear_output(h)
+            res.append(y)
+
+        return np.array(res)
+
+    def backprop_step(self, dL_dh, data):
+        dL_dh += self.backprop_output(data)
+        return super().backprop_step(dL_dh)
+
+    def train_on_example(self, x, y, learning_rate):
+        self.initialize_gradients()
+
+        self.enable_caching = False
+
+        eps = 1e-7
+
+        dL_dh_app = np.zeros((self.n_dims_hidden, 1))
+
+        for i in range(self.n_dims_hidden):
+            h_plus_eps = np.zeros((self.n_dims_hidden, 1))
+            h_minus_eps = np.zeros((self.n_dims_hidden, 1))
+            h_plus_eps[i] = [eps]
+            h_minus_eps[i] = [-eps]
+            h_plus_out = self.forward(x, h_plus_eps)
+            h_minus_out = self.forward(x, h_minus_eps)
+            # print(h_plus_out, y)
+            h_plus_loss = np.sum(loss_functions[self.loss_func][0](h_plus_out, y))
+            h_minus_loss = np.sum(loss_functions[self.loss_func][0](h_minus_out, y))
+            # print([(self.forward(x, h_plus_eps)[0] - self.forward(x, h_minus_eps)[0]) / (2*eps)])
+            dL_dh_app[i] = [(h_plus_loss - h_minus_loss) / (2*eps)]
+
+
+        self.enable_caching = True
+
+        y_out = self.forward(x)
+
+        dL_dh = np.zeros((self.n_dims_hidden, 1))
+        
+        # print(list(y))
+
+        self.backprop(dL_dh, learning_rate, list(y))
+
+        print(dL_dh)
+        print(dL_dh_app)
+
+        # print(np.linalg.norm(dL_dh - dL_dh_app))
+
+        # print(y_out)
+
+        return np.sum(loss_functions[self.loss_func][0](y_out, y))
