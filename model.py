@@ -93,7 +93,7 @@ class BaseLSTM:
         return dL_dh, dL_dc
 
     
-    def backprop(self, dL_dh, dL_dc, learning_rate, data_stack=None):
+    def backprop(self, dL_dh, dL_dc, data_stack=None):
 
         while self.cache:
             if data_stack is None:
@@ -101,12 +101,12 @@ class BaseLSTM:
             else:
                 dL_dh, dL_dc = self.backprop_step(dL_dh, dL_dc, data_stack.pop())
                 
+        return dL_dh, dL_dc
 
+    def update_params(self, learning_rate):
         for param_name, param in self.params.items():
             grads = self.grads[param_name]
             self.params[param_name] = tuple(param[i] - grads[i]*learning_rate for i in range(len(grads)))
-
-        return dL_dh, dL_dc
 
     def forward_step(self, x, c, h):
         f,i,g,o = 0, 0,0,0
