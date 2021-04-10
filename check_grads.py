@@ -1,7 +1,7 @@
 from functions import *
 from model import *
 import numpy as np
-
+np.random.seed(12321)
 
 def calc_grad(func, h):
     shape = h.shape
@@ -38,6 +38,18 @@ def calc_param_grads(model_runner, model: BaseLSTM):
             
     return results
 
+def collect_param_results(grads, results):
+    result = 0
+    total = 0
+
+    for param_name, params in grads:
+        for i in range(len(params)):
+            delta = params[i] - results[param_name][i]
+            delta[abs(delta) < 1e-7] = 0
+            result += np.linalg.norm(delta)
+            total += 1
+
+    return result / total
 
 def run_checks(checker, times, eps, name):
     results = np.array([np.linalg.norm(checker()) for _ in range(times)])
@@ -68,6 +80,20 @@ def check_softmax_ce():
     
     return dL_dx_app - dL_dx
 
+
+def check_softmax():
+    n_dims_in = 7
+    n_dims_out = 7
+
+    x = np.random.rand(n_dims_in, 1)
+    y = np.random.rand(n_dims_out, 1)
+
+    out = softmax(x)
+    dL_dx = square_loss_grad(out, y)
+    dL_dx = softmax_grad(dL_dx, x)
+    
+    dL_dx_app = calc_grad(lambda x: square_loss(softmax(x) , y), x).reshape(dL_dx.shape)
+    return dL_dx_app - dL_dx
 
 
 def check_linear_with_activation():
@@ -116,7 +142,7 @@ def check_one_layer():
         "n_dims_hidden" : n_dims_hidden,
         "n_dims_out" : n_dims_out,
         "loss_func" : "softmax_ce",
-        "output_activation" : softmax
+        "output_activation" : "softmax"
     }
 
     model = OneToOneLSTM(params)
@@ -138,6 +164,7 @@ def check_one_layer():
 
     dL_dh = model.backprop_output(y)
     dL_dc = np.zeros(h.shape)
+    dL_dx = np.zeros(x.shape)
     dL_dh, dL_dc = model.backprop(dL_dh, dL_dc)
 
     return dL_dh_app - dL_dh
@@ -153,7 +180,7 @@ def check_many_to_one():
         "n_dims_hidden" : n_dims_hidden,
         "n_dims_out" : n_dims_out,
         "loss_func" : "square",
-        "output_activation" : lambda x : x
+        "output_activation" : "id"
     }
 
     model = ManyToOneLSTM(params)
@@ -175,6 +202,7 @@ def check_many_to_one():
 
     dL_dh = model.backprop_output(y)
     dL_dc = np.zeros(h.shape)
+    dL_dx = np.zeros(x.shape)
     dL_dh, dL_dc = model.backprop(dL_dh, dL_dc)
 
     return dL_dh_app - dL_dh
@@ -191,7 +219,7 @@ def check_many_to_many():
         "n_dims_hidden" : n_dims_hidden,
         "n_dims_out" : n_dims_out,
         "loss_func" : "square",
-        "output_activation" : lambda x : x
+        "output_activation" : "id"
     }
 
     model = ManyToManyLSTM(params)
@@ -215,6 +243,7 @@ def check_many_to_many():
 
     dL_dh = np.zeros(h.shape)
     dL_dc = np.zeros(h.shape)
+    dL_dx = np.zeros(x.shape)
     dL_dh, dL_dc = model.backprop(dL_dh, dL_dc, list(y))
 
     # print(dL_dh)
@@ -256,6 +285,7 @@ def check_encoder():
 
     dL_dh = square_loss_grad(y_out, y)
     dL_dc = np.zeros(h.shape)
+    dL_dx = np.zeros(x.shape)
     dL_dh, dL_dc = model.backprop(dL_dh, dL_dc)
 
     # print(dL_dh)
@@ -263,6 +293,48 @@ def check_encoder():
 
     return dL_dh_app - dL_dh
 
+def check_decoder():
+    # n_dims_in = 10
+    n_dims_hidden = 13
+    emb_dims = 7
+    n_dims_out = 10
+    n_samples = 30
+
+    y = np.array([np.array([x]).T for x in np.eye(n_dims_out)[np.random.choice(n_dims_out, n_samples)]])
+
+    params = {
+        "n_dims_hidden" : n_dims_hidden,
+        "embedding_dims" : emb_dims,
+        "loss_func" : "square",
+        "output_activation" : "id",
+        "n_dims_out" : n_dims_out,
+        "start_token" : y[0],
+        "max_len" : n_samples
+    }
+
+    model = Decoder(params)
+
+    x = params["start_token"]
+    h = np.random.rand(n_dims_hidden, 1)
+    c = np.random.rand(n_dims_hidden, 1)
+
+    y = np.array([np.array([x]).T for x in np.eye(n_dims_out)[np.random.choice(n_dims_out, params["max_len"])]])
+    # print(y.shape)
+    # y = np.random.rand(params["max_len"], n_dims_out, 1)
+    model.initialize_gradients()
+    model.enable_caching = False
+
+    results = calc_param_grads(lambda model: square_loss(model.forward(x, h, c), y).sum(), model)
+
+    model.enable_caching = True
+    y_out = model.forward(x, h, c)
+
+    dL_dh = np.zeros(h.shape)
+    dL_dc = np.zeros(h.shape)
+    dL_dx = np.zeros((n_dims_out, 1))
+    dL_dh, dL_dc = model.backprop(dL_dh, dL_dc, list(y))
+    
+    return collect_param_results(model.grads.items(), results)
 
 def check_one_to_one_params():
     n_dims_in = 7
@@ -274,7 +346,7 @@ def check_one_to_one_params():
         "n_dims_hidden" : n_dims_hidden,
         "n_dims_out" : n_dims_out,
         "loss_func" : "softmax_ce",
-        "output_activation" : softmax
+        "output_activation" : "softmax"
     }
 
     model = OneToOneLSTM(params)
@@ -296,17 +368,10 @@ def check_one_to_one_params():
 
     dL_dh = model.backprop_output(y)
     dL_dc = np.zeros(h.shape)
+    dL_dx = np.zeros(x.shape)
     dL_dh, dL_dc = model.backprop(dL_dh, dL_dc)
 
-    result = 0
-    total = 0
-
-    for param_name, params in model.grads.items():
-        for i in range(len(params)):
-            result += np.linalg.norm(params[i] - results[param_name][i])
-            total += 1
-
-    return result / total
+    return collect_param_results(model.grads.items(), results)
 
 def check_many_to_many_params():
     n_dims_in = 10
@@ -319,7 +384,7 @@ def check_many_to_many_params():
         "n_dims_hidden" : n_dims_hidden,
         "n_dims_out" : n_dims_out,
         "loss_func" : "square",
-        "output_activation" : lambda x : x
+        "output_activation" : "id"
     }
 
     model = ManyToManyLSTM(params)
@@ -343,17 +408,10 @@ def check_many_to_many_params():
 
     dL_dh = np.zeros(h.shape)
     dL_dc = np.zeros(h.shape)
+    dL_dx = np.zeros(x.shape)
     dL_dh, dL_dc = model.backprop(dL_dh, dL_dc, list(y))
 
-    result = 0
-    total = 0
-
-    for param_name, params in model.grads.items():
-        for i in range(len(params)):
-            result += np.linalg.norm(params[i] - results[param_name][i])
-            total += 1
-
-    return result / total
+    return collect_param_results(model.grads.items(), results)
 
 def check_encoder_params():
     n_dims_in = 10
@@ -389,23 +447,19 @@ def check_encoder_params():
 
     dL_dh = square_loss_grad(y_out, y)
     dL_dc = np.zeros(h.shape)
+    dL_dx = np.zeros(x.shape)
     dL_dh, dL_dc = model.backprop(dL_dh, dL_dc)
 
-    result = 0
-    total = 0
-
-    for param_name, params in model.grads.items():
-        for i in range(len(params)):
-            result += np.linalg.norm(params[i] - results[param_name][i])
-            total += 1
-
-    return result / total
+    return collect_param_results(model.grads.items(), results)
 
 
-# run_checks(check_softmax_ce, 10, 1e-7, "softmax_ce")
-# run_checks(check_one_layer, 10, 1e-7, "One to One")
-# run_checks(check_many_to_one, 10, 1e-7, "Many to One")
-# run_checks(check_many_to_many, 10, 1e-7, "Many to Many")
-# run_checks(check_one_to_one_params, 10, 1e-7, "OtO params")
-# run_checks(check_many_to_many_params, 1, 1e-7, "MtM params")
+run_checks(check_softmax_ce, 10, 1e-7, "softmax_ce")
+run_checks(check_one_layer, 10, 1e-7, "One to One")
+run_checks(check_many_to_one, 10, 1e-7, "Many to One")
+run_checks(check_many_to_many, 10, 1e-7, "Many to Many")
+run_checks(check_one_to_one_params, 10, 1e-7, "OtO params")
+run_checks(check_many_to_many_params, 1, 1e-7, "MtM params")
+run_checks(check_encoder, 10, 1e-7, "Encoder")
 run_checks(check_encoder_params, 10, 1e-7, "Encoder params")
+run_checks(check_decoder, 4, 1e-7, "Decoder params")
+run_checks(check_softmax, 4, 1e-7, "softmax")

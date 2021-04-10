@@ -20,6 +20,17 @@ def softmax(z):
     e_z = np.exp(z - np.max(z))
     return e_z / e_z.sum(axis=0)
 
+def softmax_grad(dL, z):
+    n = z.shape[0]
+    s = softmax(z)
+    res = []
+    for i in range(n):
+        i_vec = np.eye(n)[i].reshape(s.shape)
+        line = np.sum(s*i_vec)*(i_vec * (1 - s) + (i_vec - 1)*s)
+        res.append([np.sum(line * dL)])
+
+    return np.array(res)
+
 def softmax_cross_entropy_loss(z, y):
     e_z = np.exp(z - np.max(z, axis=0))
     return np.sum(- np.ma.log (np.sum(e_z*y, axis=0) / e_z.sum(axis=0)).filled(0) * y, axis=0)
