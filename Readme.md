@@ -1,5 +1,15 @@
 # LSTM Encoder-Decoder on numpy
 
-Look in the `nb.ipynb` for usage and training
+## Directory description
 
-Run `check_grads.py` for gradient checking
+* `nb.ipynb` &mdash; usage and training.
+
+* `model.py` &mdash; model classes.
+
+* `check_grads.py` &mdash; run gradient checks.
+
+* `grad_checks.py` &mdash; preset gradient checks (it's dirty there).
+
+* `grad_checker.py` &mdash; functions for gradient checking.
+
+* `functions.py` &mdash; loss and activation functions.
