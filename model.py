@@ -27,13 +27,12 @@ class BaseLSTM:
     forward() with enabled caching should be ran before backprop()
 
     params:
-    n_dims_in, n_dims_out, loss_func
+    n_dims_in, n_dims_out
 
     """
-    def __init__(self, params):
-        self.n_dims_in = params["n_dims_in"]
-        self.n_dims_hidden = params["n_dims_hidden"]
-        self.loss_func = params["loss_func"]
+    def __init__(self, **kwargs):
+        self.n_dims_in = kwargs["n_dims_in"]
+        self.n_dims_hidden = kwargs["n_dims_hidden"]
         
         self.params = {}
         self.grads = {}
@@ -166,13 +165,14 @@ class LSTMWithOutput(BaseLSTM):
     n_dims_out, n_dims_in, n_dims_hidden, loss_func, output_activation
 
     """
-    def __init__(self, params):
-        super().__init__(params)
-        self.n_dims_out = params["n_dims_out"]
-        self.output_activation = params["output_activation"]
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.n_dims_out = kwargs["n_dims_out"]
+        self.output_activation = kwargs["output_activation"]
+        self.loss_func = kwargs["loss_func"]
         
-        LW = np.random.rand(params["n_dims_out"], params["n_dims_hidden"]) * 0.01
-        Lb = np.random.rand(params["n_dims_out"], 1) * 0.01
+        LW = np.random.rand(kwargs["n_dims_out"], kwargs["n_dims_hidden"]) * 0.01
+        Lb = np.random.rand(kwargs["n_dims_out"], 1) * 0.01
 
         self.params["Lo"] = (LW, Lb)
 
@@ -222,8 +222,8 @@ class ManyToManyLSTM(LSTMWithOutput):
     params:
     n_dims_in, n_dims_hidden, loss_func, n_dims_out, output_activation
     """
-    def __init__(self, params):
-        super().__init__(params)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     def forward(self, inp, h=None, c=None):
         if c is None:
@@ -246,19 +246,19 @@ class ManyToManyLSTM(LSTMWithOutput):
 class LSTMWithEmbeddings(BaseLSTM):
     """
     params:
-    n_dims_in, n_dims_hidden, loss_func, embedding_dims
+    n_dims_in, n_dims_hidden, embedding_dims
     """
-    def __init__(self, params):
-        n_dims_in = params["n_dims_in"]
-        params["n_dims_in"] = params["embedding_dims"]
-        super().__init__(params)
-        params["n_dims_in"] = n_dims_in
+    def __init__(self, **kwargs):
+        n_dims_in = kwargs["n_dims_in"]
+        kwargs["n_dims_in"] = kwargs["embedding_dims"]
+        super().__init__(**kwargs)
+        kwargs["n_dims_in"] = n_dims_in
         self.n_dims_in = n_dims_in
 
-        self.embedding_dims = params["embedding_dims"]
+        self.embedding_dims = kwargs["embedding_dims"]
 
-        LW = np.random.rand(params["embedding_dims"], params["n_dims_in"]) * 0.01
-        Lb = np.random.rand(params["embedding_dims"], 1) * 0.01
+        LW = np.random.rand(kwargs["embedding_dims"], kwargs["n_dims_in"]) * 0.01
+        Lb = np.random.rand(kwargs["embedding_dims"], 1) * 0.01
         self.params["Le"] = (LW, Lb)
     
     def linear_embedding(self, x):
@@ -291,7 +291,7 @@ class LSTMWithEmbeddings(BaseLSTM):
         return dL_dh, dL_dc, dL_dx
 
 class Encoder(LSTMWithEmbeddings):
-    def forward(self, inp, h, c):
+    def forward(self, inp, h, c, return_all=False):
         if c is None:
             c = np.zeros((self.n_dims_hidden, 1))
         if h is None:
@@ -300,19 +300,22 @@ class Encoder(LSTMWithEmbeddings):
         for x in inp:
             c, h = self.forward_step(self.linear_embedding(x), c, h)
 
+        if return_all:
+            return h, c
+
         return h
         
 
 class Decoder(LSTMWithEmbeddings, LSTMWithOutput):
-    """
-    params:
-    n_dims_hidden, loss_func, embedding_dims, n_dims_out, output_activation, start_token, max_len
-    """
-    def __init__(self, params):
-        params["n_dims_in"] = params["n_dims_out"]
-        super().__init__(params)
-        self.start_token = params["start_token"]
-        self.max_len = params["max_len"]
+    def __init__(self, **kwargs):
+        """
+        params:
+        n_dims_hidden, loss_func, embedding_dims, n_dims_out, output_activation, start_token, max_len
+        """
+        kwargs["n_dims_in"] = kwargs["n_dims_out"]
+        super().__init__(**kwargs)
+        self.start_token = kwargs["start_token"]
+        self.max_len = kwargs["max_len"]
         self.dL_dx = np.zeros((self.n_dims_out, 1))
     
     def forward(self, inp, h, c):
@@ -329,8 +332,6 @@ class Decoder(LSTMWithEmbeddings, LSTMWithOutput):
             c, h = self.forward_step(e, c, h)
             y, _ = self.linear_output(h)
             
-            # token = np.zeros(y.shape)
-            # token[y.argmax()] = 1
             res.append(y)
 
         return np.array(res)
@@ -362,5 +363,58 @@ class Decoder(LSTMWithEmbeddings, LSTMWithOutput):
 
         return np.dot(LW.T, dL_dy)
 
-    # def propagate_from_dx(self, dL_dx):
+class DecoderWithEncoder:
+    def __init__(self, token_dims, enc_emb_dims, dec_emb_dims, n_dims_hidden, loss_func, activation_func, max_len, start_token):
+        enc_params = {
+            "n_dims_in" : token_dims,
+            "n_dims_hidden" : n_dims_hidden,
+            "embedding_dims" : enc_emb_dims,
+        }
+        dec_params = {
+            "n_dims_hidden" : n_dims_hidden,
+            "loss_func" : loss_func,
+            "embedding_dims" : dec_emb_dims,
+            "n_dims_out" : token_dims,
+            "output_activation" : activation_func,
+            "start_token" : start_token,
+            "max_len" : max_len
+        }
+        self.encoder = Encoder(**enc_params)
+        self.decoder = Decoder(**dec_params)
+        
 
+    def forward(self, inp, h=None, c=None):
+        if c is None:
+            c = np.zeros((self.encoder.n_dims_hidden, 1))
+        if h is None:
+            h = np.zeros((self.encoder.n_dims_hidden, 1))    
+
+        h, c = self.encoder.forward(inp, h, c, True)
+
+        return self.decoder.forward(None, h, c)
+
+    def backprop(self, data_stack):
+        dL_dh, dL_dc = np.zeros((self.decoder.n_dims_hidden, 1)), np.zeros((self.decoder.n_dims_hidden, 1))
+
+        dL_dh, dL_dc = self.decoder.backprop(dL_dh, dL_dc, data_stack)
+        dL_dh, dL_dc = self.encoder.backprop(dL_dh, dL_dc)
+
+        return dL_dh, dL_dc
+
+    def enable_caching(self, val):
+        self.encoder.enable_caching = val
+        self.decoder.enable_caching = val
+    
+    def initialize_gradients(self):
+        self.encoder.initialize_gradients()
+        self.decoder.initialize_gradients()
+
+    def update_parameters(self, learning_rate):
+        self.encoder.update_params(learning_rate)
+        self.decoder.update_params(learning_rate)
+
+    def copy_params(self):
+        return (self.decoder.params.copy(), self.encoder.params.copy())
+
+    def set_params(self, params):
+        self.decoder.params, self.encoder.params = params
